@@ -1,0 +1,12 @@
+{
+  "taps": [
+    {
+      "repo": "https://github.com/abelrguezr/hacktricks-skills",
+      "path": "skills/"
+    },
+    {
+      "repo": "https://github.com/elementalsouls/Claude-BugHunter",
+      "path": "skills/"
+    }
+  ]
+}

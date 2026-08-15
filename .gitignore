@@ -1,0 +1,9 @@
+# Runtime/cache files - regenerable, don't need to sync
+.usage.json
+.usage.json.lock
+.hub/audit.log
+.hub/index-cache/
+
+# OS junk
+.DS_Store
+Thumbs.db
