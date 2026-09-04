@@ -175,6 +175,49 @@ Other supported `type` values for the PATCH markdown endpoint:
 - Write JSON payload to temp file (`json.dump`), pass `-d @/tmp/file.json` to avoid shell escaping
 - Title format: `[CVE Pending] {plugin} v{version} — {vuln type}`
 
+## Patchstack Browser Autofill (React/Custom Dropdown Workaround)
+
+The Patchstack report form uses React-based custom dropdowns (combobox with
+`role="combobox"` and `role="option"`) that do NOT respond to `browser_type`
+or `browser_click` reliably. Native `<select>` elements are absent.
+
+### Reliable Autofill Technique
+
+1. **Text fields** — `browser_type` works normally
+2. **Dropdowns** — must click to open, then click the option by ref:
+   ```
+   browser_click(ref="@e32")  # opens dropdown
+   # snapshot to find option refs
+   browser_click(ref="@e28")  # clicks "Privilege Escalation" option
+   ```
+3. **Custom role text field** — appears after selecting "Custom role" from
+   the Pre-requisite dropdown. Fill via `browser_type`.
+4. **Large textareas** — `browser_type` may silently fail (React doesn't
+   detect the value). Use JS console injection instead:
+   ```javascript
+   var ta = document.querySelectorAll('textarea')[0];
+   ta.value = "description text";
+   ta.dispatchEvent(new Event('input', {bubbles: true}));
+   ta.dispatchEvent(new Event('change', {bubbles: true}));
+   ```
+5. **Consent checkbox** — `browser_click` on the checkbox ref often fails
+   (custom UI). Use JS:
+   ```javascript
+   var cb = document.querySelectorAll('input[type="checkbox"]')[5];
+   cb.click();
+   cb.checked = true;
+   cb.dispatchEvent(new Event('change', {bubbles: true}));
+   ```
+6. **Submit button** — stays disabled until ALL required fields are filled.
+   Check via: `document.querySelectorAll('button')[20].disabled`
+
+### OWASP Type for Privesc
+- **Class:** A1: Broken Access Control
+- **Type:** Privilege Escalation (NOT "Broken Access Control" — that's a
+  separate option, but privesc is more specific and correct)
+- **Pre-requisite:** Custom role → enter "Jobseeker" (or plugin-specific
+  role name) — the role must not exceed Subscriber/Customer capabilities
+
 ## Common Vulnerability Patterns
 
 ### Pattern: Nopriv handler with exposed nonce (no capability check)
