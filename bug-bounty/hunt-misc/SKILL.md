@@ -232,6 +232,17 @@ dig TXT rubylang.org | grep spf
 
 ---
 
+## Rate-Limit Bypass Toolkit (brutecat Google phone brute $5k)
+
+- **IPv6 /64 rotation**: most VPS providers give a /64 (2^64 addresses). Rotate source IP per request (Rust reqwest `local_address`, Go `net.Dialer.LocalAddr`) — defeats per-IP rate limits that don't check account/token. Then still needed: defeat the JS/bot-layer.
+- **Cross-form token replay**: anti-abuse tokens (BotGuard) generated on the JS-enabled form were accepted on the legacy No-JS form (`bgresponse=<bgtoken>` instead of `js_disabled`) — and the No-JS form had NO per-token request limit. Always test whether an anti-bot token issued in one flow validates in a sibling flow.
+- **Display-name leak without interaction**: Looker Studio document ownership transfer leaked victim display name with 0 clicks. Forgotten/legacy products often still return names removed elsewhere.
+- **Keyspace shrink via phone-mask fingerprinting**: forgot-password phone hint (`•• ••••••••03`) + libphonenumber national-format masks fingerprint country + area codes → brute only remaining digits (~40k req/s). Chain: display name + masked phone → targeted existence oracle → full number.
+
+## GraphQL @Signature directive-overloading (sign-everything-except-itself flaw)
+
+When a request body's integrity is protected by a signature directive embedded in the body itself (`query ... @Signature(bytes:"...")`), the signature cannot cover itself — adding MORE `@Signature` directives usually still passes validation while multiplying server-side signature-verification work (Google Cloud Console: 1M directives = 109s backend hang). Use for timing/DoS; also note the signature key was a hardcoded sentence — always ask how client-side signing keys are derived.
+
 ## Gate 0 Validation
 
 Before writing the report, answer these three questions:

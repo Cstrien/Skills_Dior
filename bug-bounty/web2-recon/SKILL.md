@@ -477,6 +477,8 @@ python3 ~/.hermes/skills/bug-bounty/web2-recon/scripts/lightweight_js_analyzer.p
 
 Use this only for normal web retrieval and endpoint mapping. Do not frame it as bypassing authentication or OTP; it is a transport/browser-fingerprint fallback for passive recon.
 
+**Cloudflare 1015 (rate-limited) recovery:** burst-probing an API endpoint (>~15 req/min from one IP) triggers Cloudflare error 1015 (`error code: 1015`, HTTP 429) that persists across UA-string changes for several minutes. Recovery recipe: back off 5–10 minutes, then switch to `curl_cffi` with `impersonate="chrome120"` and a fresh session per batch — rotating the UA string with plain `curl` is NOT enough (the TLS fingerprint is the discriminator). Build the request budget into the test plan up front instead of discovering the cap mid-chain; a mid-flow 1015 kills the whole session state (PAR/login-flow chains die with it).
+
 ## GITHUB DORKING FOR TARGET
 
 ## GITHUB DORKING FOR TARGET
@@ -946,6 +948,14 @@ curl -sI "https://$BUCKET_NAME.s3.amazonaws.com/" 2>/dev/null | grep -i x-amz-bu
 ```
 
 **Key insight:** A `403 AccessDenied` on the direct S3 URL does NOT mean the bucket is private. Always check if a subdomain proxies to it. The `x-amz-bucket-region` header on the direct S3 response confirms the bucket exists and leaks its region even on denied requests.
+
+### First-party edge paths expose LIST on private buckets + sibling-bucket sweep
+
+Beyond third-party proxies (certs.*), first-party edge paths often expose bucket LIST operations on private buckets: `https://prime.<target>/file-service/static/` returned a full `ListBucketResult` (bucket name visible in `<Name>`) while direct S3 returned 403. Probe every edge path that mirrors the file URLs seen in the JS bundles.
+
+- **Paginate correctly**: loop `?marker=<last Key>` until `<IsTruncated>false</IsTruncated>` and parse with `xml.etree.ElementTree`, not regex. A regex like `<Key>([^<]+)</Key><LastModified>...` silently drops objects whose filename contains characters that break the pattern (spaces, accents) and regex-over-truncated-pages undercounts badly — one pass reported "263 objects" where parsing + pagination found 1,255.
+- **Sibling-bucket sweep by naming convention**: once one bucket name is known (`platform-<service>-<env>` pattern), generate candidates across services (file-service, crm, kyc, documents, invoices, media, onboarding, archive, uploads, hr...) × envs (prod, beta, staging, dev, uat) and GET them. 404 = NoSuchBucket, 403 + `x-amz-bucket-region` = exists (free infra/region map — one sweep found 22 real sibling buckets across us-west-2/eu-west-1/eu-central-1/us-east-1), 200 = listable jackpot.
+- Sibling buckets stay 403 via direct S3 — look for the gateway edge path (`/file-service/<bucket>/`, `/<bucket>/`) on each live edge host to expose them.
 
 **Lesson from a bancoplata.mx engagement:** `certs.platacard.mx` served as a Cloudflare proxy to `vault-pki-storage-prod` S3 bucket (us-west-2). Direct S3 access returned `AccessDenied`, but the Cloudflare proxy at `certs.platacard.mx` returned a full `ListBucketResult` XML with all object keys (HashiCorp Vault PKI certificates, CRLs). The bucket name was visible in the XML `<Name>` field.
 

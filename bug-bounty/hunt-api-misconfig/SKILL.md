@@ -162,6 +162,23 @@ Treat `tenant_id` / OAuth `client_id` and internal service names as **recon lead
 
 ---
 
+## Google InnerTube/ProtoJson hidden-parameter dump (brutecat class — $20k pattern)
+
+Google-style APIs that support `Content-Type: application/json+protobuf` accept positional ARRAYS instead of named fields. Sending numeric values into every position with the WRONG types produces 400 errors that enumerate EVERY parameter name + type at each position — including secret/hidden/dev params the frontend never sends.
+
+```http
+POST /youtubei/v1/browse
+Host: youtubei.googleapis.com
+Content-Type: application/json+protobuf
+
+[1,2,3,4,5,6,...,30]
+```
+→ `Invalid value at 'browse_id' (TYPE_STRING), 2` ... — full field map. Automate: **req2proto** converts any captured request to the full .proto schema (see github.com/Arinerron/req2proto / brutecat's decoding-google).
+
+Then diff the dumped schema vs what the frontend actually sends — hidden params (`critical_read`, `include_suspended`, debug flags) frequently change authorization behavior or leak sensitive fields (hidden `include_suspended` param on studio get_creator_channels leaked YouTube creator content-owner emails, $20k).
+
+Related: single wrong-type param also leaks name+type: `"browseId": 1` → `Invalid value at 'browse_id' (TYPE_STRING), 1`. An insufficient-scope 403 (`Www-Authenticate: Bearer ... scope="..."`) lists required OAuth scopes AND the gRPC service/method name — use both as spec-oracles.
+
 ## NSwag / Swagger / OpenAPI Spec Exposure (2024-2026 surface)
 
 NSwag is the Swagger/OpenAPI toolchain for ASP.NET Core. Default routes (`/swagger`, `/swagger/v1/swagger.json`, `/swagger/index.html`) ship enabled in many .NET 6/7/8 projects and developers leave them on in production. The exposed spec discloses every endpoint, HTTP methods, parameter names + types + formats + max-lengths, models, validation rules — a complete attack-map in JSON.

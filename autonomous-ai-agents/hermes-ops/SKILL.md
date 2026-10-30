@@ -203,3 +203,12 @@ systemctl --user edit hermes-gateway
   (oversized/unparseable multi-command one-liners), not the operation itself. Do not retry
   the same inline string; the recovery path is to execute the saved file via
   `bash /home/kali/.hermes/cache/blocked-scripts/blocked-<id>.sh` in a terminal call.
+- **Multi-line bash loops are unreliable in the hermes terminal** — a
+  `for u in ...; do curl ...; done` spanning lines hits the same malformed-payload
+  parser limit. For bulk enumeration write the wordlist to a file and run
+  `cat wl.txt | xargs -P 8 -I{} sh -c '...'` in a single line. When building JSON
+  payloads with nested quotes inside such an `sh -c`, escape carefully
+  (`\\"username\\":\\"{}\\"`) or write payloads to files with `curl -d @file`.
+- **grep on curl output containing UTF-8 Vietnamese/localized text** — the output
+  can be treated as binary; use `grep -a` and match the ASCII portion
+  (e.g. `"code":404`) rather than the localized error message.

@@ -476,6 +476,16 @@ A bypass claim requires response **body** differential, not just status code.
 
 **Lesson from an authorized engagement:** `Host: target.example:80@evil.example.com` returned HTTP 200 instead of the baseline 403. Looked like a Host-header bypass. But the body was byte-identical (8341 bytes both) — the AWS ELB normalised the Host to `target.example:80`, dropping the `@evil` portion. Not a bypass.
 
+### Gateway fixed-deny pages: definitive retest before claiming a header bypass
+
+Envoy/Istio-style edge gateways answer EVERY non-allowlisted route with one fixed body (`RBAC: access denied`, HTTP 403). That is a per-route allowlist, not per-header gating — Origin/Referer/X-Forwarded-* tricks do not unlock routes.
+
+1. Before claiming "header X unlocks route Y", retest the SAME route with and without the header **in one batch** and diff bodies. If it returns application-level 400/410/500 both ways, the route was never RBAC-gated — the "bypass" is a false positive and gets retracted.
+2. Treat the client's JS env-config (the list of API base paths the SPA actually calls) as the allowlist and probe exactly those prefixes; everything else denies regardless.
+3. Verb tampering, path confusion (`//`, `/./`, `;`, uppercase), absolute-URI and Content-Type fuzzing are all ineffective against path-prefix allowlists — don't spend the 20-minute rotation budget on them.
+
+Retraction precedent: an "Origin/Referer RBAC bypass" finding was fully retracted after a definitive same-batch retest showed the route had never been gated.
+
 ### WAF POST-Body Blind Spot (recurring pattern)
 
 ModSecurity / Apache mod_security-style WAFs that block SQL keywords (`AND 1=1`, `OR 1=1`, `UNION SELECT`, `'--`) in URL paths frequently **do not inspect POST request bodies**. When Phase 3 testing of a URL-path parameter hits a 403 wall, do NOT assume the same payload fails everywhere — re-test it via the POST body of the same app's own forms (search boxes, login forms, filters).

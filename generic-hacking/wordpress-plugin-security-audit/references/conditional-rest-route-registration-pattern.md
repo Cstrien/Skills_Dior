@@ -122,3 +122,57 @@ registration is **unconditional**:
 4. If unconditionally registered → proceed with callback analysis as normal
 
 This prevents wasted time tracing callbacks that are unreachable unauthenticated.
+
+## Sibling Pattern: Registrar Wrapper with requires_admin Semantics (2026-09-17, wb4wp)
+
+Inline `current_user_can()` gates are one variant. The second major variant is a
+**registrar wrapper class** with per-route admin flags:
+
+```php
+// Wrapper (class-api-manager.php) — the gate lives in register_route(), NOT in the route arrays:
+private function register_route( array $route ) {
+    $is_admin = current_user_can( 'administrator' );
+    if ( ! $is_admin && $requires_admin ) {
+        return;   // ← route registration SKIPPED for anon → 404 rest_no_route
+    }
+    $arguments = array(
+        ...
+        self::ROUTE_PERMISSION_CALLBACK => function () use ( $no_cache_response ) {
+            if ( $no_cache_response ) { nocache_headers(); }
+            return true;   // ← wrapper DEFAULT: always-true permission
+        },
+    );
+    if ( array_key_exists( self::ROUTE_PERMISSION_CALLBACK, $route ) ) {
+        $arguments[ self::ROUTE_PERMISSION_CALLBACK ] = $route[ self::ROUTE_PERMISSION_CALLBACK ];
+    }
+    register_rest_route( self::API_NAMESPACE, $path, $arguments );
+}
+```
+
+Rules:
+- Wrapper default permission `return true` → every route WITHOUT an explicit
+  permission key is public **when it gets registered**.
+- The explicit `requires_admin=false` key is the ONLY thing that makes those
+  routes registered for anon. Routes without the key default admin=true →
+  never registered for anon → `rest_no_route` 404 → NOT findings, no matter how
+  dangerous the handler (leak options, SSO JWT, publish pages).
+- Read route arrays alone → wrong route list in BOTH directions. Audit the
+  wrapper's defaults + flag semantics, then live-verify on an installed lab copy:
+  `GET /wp-json/` shows exactly what the current (anon) request can see.
+
+**Worked example (wb4wp / Bluehost Website Builder v1.0-2781, exact production zip
+from `wp-versions.builderservices.io/content/bluehost-version.json`):** confirmed
+live-unauth (requires_admin=false + no perm cb): `POST /save_site` (overwrites the
+whole site model, writes attacker data into `wp_options.wb4wp_api_keys`, removes
+`wp_filter_post_kses` so arbitrary HTML enters post_content, `file_put_contents`
+JSON to uploads), `GET /wp_posts` (full post content leak), `GET /wc_products`,
+`POST /posts/{id}/publish_autosave`, `POST /posts/{id}/discard_autosave`,
+`POST /disable-plugin`. Look-alike routes without the false flag (`/drafts`,
+`/description`, `/sso`, `/provision`, `/publish`, `/plugin-state`) → 404 for anon.
+First-pass source read that assumed "no explicit admin flag = registered for
+everyone" was wrong; the lab run corrected the list. See also
+`wp-plugin-lab-validation.md` for the vendor-zip → lab pipeline and
+`scripts/audit_rest_routes.php` for the layer-1 scanner. The full 3-request
+exploit chain built on these routes (published-page overwrite → unauth
+publish_autosave → stored XSS rendered to every visitor) is documented in
+`references/wb4wp-v1.0-2781-full-chain.md`.

@@ -136,6 +136,16 @@ have a finding.
 
 ---
 
+## Multi-layer sanitizer/renderer bypass (Google Gemini/Colab class — $20k patterns)
+
+Modern LLM products are LAYERED: proto parse → linkifier → sanitizer → renderer → bridge product. Bug = layer-skew, not single-parser bug.
+
+- **Map the image pipeline first**: which layers treat `![](url)` as image vs link? In Gemini, the linkifier did NOT treat `!` as a hostname char → injecting `!` before a linkified URL converted it to an un-sanitized markdown IMAGE. Attacker controls only the prefix character but that flips link→image and skips sanitization.
+- **Bridge products as context-escape**: "Export to Colab"-style features carry model output into ANOTHER product that parses differently. Find which layer escapes `![]()` and which doesn't — e.g. `[](https:)<unescaped>` hyperlink syntax confused the intermediate escape layer so the following image was never escaped.
+- **CSP allowlist + open redirect exfil**: when `img-src` only allows `*.google.com`-style hosts, use an open redirect INSIDE the allowlist: `https://www.google.com/amp/s/<attacker-host>/<path>` (AMP path). Also URL-encode letters of the attacker domain (`%6c%65`...) to defeat server-side domain-string checks that validate the markdown source. Multi-host renderers (googleusercontent) may reject non-allowlisted redirects — test each renderer.
+- **URI-parser evasion**: if the linkifier prefixes your subdomain with `https://www.google.com/search?q=`, inject a userinfo part to confuse the URI parser.
+- **Fix-scoping lesson**: treat the EXFIL VECTOR (renderable image/callback) as the reportable, deterministic bug — not the non-deterministic indirect prompt injection.
+
 ## IDOR-via-AI (cross-tenant data through the model's data layer)
 The model is just a confused-deputy client of some backend. The bug is missing
 per-session/per-tenant scoping on the *tool or retrieval layer*, not the prompt.

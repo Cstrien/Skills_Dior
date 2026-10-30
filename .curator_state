@@ -1,9 +1,9 @@
 {
-  "last_report_path": "/home/kali/.hermes/logs/curator/20260910-155712",
-  "last_run_at": "2026-09-10T15:57:12.579265+00:00",
-  "last_run_duration_seconds": 84.061895,
-  "last_run_summary": "auto: 3 marked stale; llm: skipped (consolidation off)",
+  "last_report_path": "/home/kali/.hermes/logs/curator/20261029-193544",
+  "last_run_at": "2026-10-29T19:35:44.765455+00:00",
+  "last_run_duration_seconds": 218.875426,
+  "last_run_summary": "auto: 4 marked stale; llm: skipped (consolidation off)",
   "last_run_summary_shown_at": "2026-08-06T14:02:03.591316+00:00",
   "paused": false,
-  "run_count": 10
+  "run_count": 17
 }

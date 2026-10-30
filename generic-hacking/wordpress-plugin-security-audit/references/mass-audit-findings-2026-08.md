@@ -134,3 +134,20 @@ were or were not exploitable — to avoid re-auditing the same plugins.
 | Directories used | plugin_audit through plugin_audit11 |
 | Extended audit | See `references/mass-audit-findings-batches-12-19.md` (~130 more plugins, batches 12-19) |
 | **Grand total (all batches)** | **~300 plugins** |
+
+## wb4wp / Bluehost Website Builder v1.0-2781 (2026-09-17) — CONFIRMED CRITICAL CHAIN ✅
+
+- Commercial/Newfold proprietary build (not wordpress.org) — obtained exact
+  production zip via vendor version API (`wp-versions.builderservices.io`)
+- **Unauth full site-takeover chain:** `POST /save_site` (no perm callback,
+  `requires_admin=false`) overwrites pages/options/uploads JSON →
+  `POST /posts/{id}/publish_autosave` publishes attacker revision → stored XSS
+  via raw `featureScript` echo in Template_Manager, rendered to every visitor
+- Also unauth: `GET /wp_posts` content leak, `POST /disable-plugin`,
+  `GET /wc_products`, `/posts/{id}/discard_autosave`
+- NOT exploitable: `/drafts`, `/description`, `/sso`, `/provision`, `/publish`
+  (requires_admin defaults true → not registered for anon)
+- **Full chain + payload schema:** `references/wb4wp-v1.0-2781-full-chain.md`
+- **Lab pipeline:** `references/wp-plugin-lab-validation.md`
+- **No public Bluehost BB program** — validated on local lab only, do not submit
+  to Patchstack (commercial vendor, different intake; user's call)

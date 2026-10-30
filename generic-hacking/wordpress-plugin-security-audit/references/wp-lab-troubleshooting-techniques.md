@@ -50,6 +50,28 @@ silently and `get_option('active_plugins')` returns `false`, causing a
 MySQL shows the option exists, but `get_option('active_plugins')` in PHP
 returns `false`.
 
+**Corollary — the trailing-newline variant (2026-09-17, wb4wp):** a `mysql -N -B`
+SELECT of the serialized value can LOOK clean while `unserialize()` fails at
+"offset 52 of 120" — the stored value contains a trailing newline that the
+displayed hexdump only shows as `7d 0a` at the very end. Symptom chain: any
+`wp plugin activate` dies with the `in_array(): Argument #2 must be of type
+array, false given` fatal at `wp-admin/includes/plugin.php:663`, AND the plugin
+silently stops loading (REST routes 404, namespace missing from `/wp-json/`)
+even though `wp_options.active_plugins` reads back as a plausible serialized
+string. Root cause: writing the serialized value through nested shell quoting
+(`mysql -e "UPDATE ... 'a:2:{...\"...\"...}'"`) corrupts bytes. **Never hand-write
+`active_plugins` via mysql.** Fix in one step with wp eval, which serializes
+correctly:
+
+```bash
+wp eval 'update_option("active_plugins",
+  array("other-plugin/other.php","vendor-slug/vendor-file.php"), true);
+  echo "UPDATED";' --path=/var/www/html/wordpress --allow-root
+```
+
+Verify with `wp eval 'var_dump(get_option("active_plugins"));'` → must be an
+array, not `bool(false)`.
+
 **Verify activation worked:**
 ```bash
 # CLI check (may fail if wp-cli still has FTP issue)

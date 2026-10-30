@@ -7,3 +7,4 @@
 # OS junk
 .DS_Store
 Thumbs.db
+.curator_backups/
